@@ -1,0 +1,210 @@
+# Boron — MCP Server for Stacked Pull Requests
+
+> Boron lets you split large code changes into small, reviewable, chained GitHub PRs using git-branchless.
+
+## Requirements
+
+The target repository MUST have `git branchless init` run before any Boron tool will work. If you get errors about branchless not being initialized, tell the user to run `git branchless init` in their repo.
+
+## Tools Reference
+
+### create_stack
+
+Creates a chain of git branches from file changes. Each commit becomes a branch that builds on the previous one.
+
+Parameters:
+- `commits` (required, array) — Ordered list of commits (bottom to top). Each commit has:
+  - `branch_name` (required, string) — e.g. "feat/tm-161-01-migrations"
+  - `commit_message` (required, string) — Conventional commit format, e.g. "feat: add auth tables"
+  - `files` (required, string[]) — File paths to include in this commit. Files must exist in the working tree.
+- `base_branch` (optional, string, default: "main") — Branch to start the stack from.
+- `linear_issue` (optional, string) — Issue ID to append to commit messages, e.g. "TM-161".
+
+Behavior:
+- Checks out base_branch, then creates each branch sequentially with `git checkout -b`.
+- Files that don't exist are skipped with a warning (not an error), unless ALL files in a commit are missing.
+- The stack is created locally. No pushing happens. Use `submit_stack` afterward to push and create PRs.
+
+### submit_stack
+
+Pushes all stack branches to the remote and creates chained GitHub PRs.
+
+Parameters:
+- `draft` (optional, boolean, default: false) — Create PRs as drafts.
+- `linear_issue` (optional, string) — Issue ID to include in PR bodies.
+
+Behavior:
+- Detects stack branches using `git branchless query 'stack()' --branches`.
+- Always force-pushes every branch (updates existing PRs automatically).
+- Only creates a new PR if one doesn't already exist for that branch.
+- Each PR targets the previous branch as its base (PR #1 → main, PR #2 → PR #1's branch, etc.).
+- PR body includes a stack overview showing all branches and their position.
+
+### view_stack
+
+Displays the current commit graph using git-branchless smartlog.
+
+No parameters.
+
+Output symbols:
+- `@` = current HEAD position
+- `>` = current branch
+- `O` = commit on main
+- `o` = commit on a stack branch
+
+### navigate_stack
+
+Moves between commits in the stack.
+
+Parameters:
+- `direction` (required, "next" | "prev") — "next" moves toward the tip, "prev" moves toward the base.
+- `distance` (optional, integer, default: 1) — Number of commits to move.
+
+Returns the new branch name and commit message after moving.
+
+### modify_commit
+
+Amends the current commit with new file changes and/or a new commit message.
+
+Parameters:
+- `files` (optional, string[]) — File paths to stage and amend into the current commit.
+- `message` (optional, string) — New commit message (replaces existing).
+- `auto_restack` (optional, boolean, default: true) — Automatically rebase all descendant branches after amending.
+
+At least one of `files` or `message` must be provided.
+
+Behavior:
+- If files provided: stages them with `git add`, then amends with `--no-edit`.
+- If message provided: amends with the new message.
+- If auto_restack is true (default): runs `git restack` to rebase all branches above the amended commit. This is critical for maintaining stack integrity.
+
+### restack
+
+Rebases all descendant branches after a mid-stack commit was amended.
+
+No parameters.
+
+Use this when: you manually amended a commit (without modify_commit's auto_restack), or when the stack graph shows orphaned commits.
+
+### sync_stack
+
+Pulls remote changes and rebases all local stacks on top of the updated main branch.
+
+No parameters.
+
+Equivalent to `git fetch --all` + `git sync --pull`.
+
+### merge_stack
+
+Merges all PRs in the current stack from bottom to top.
+
+Parameters:
+- `method` (optional, "squash" | "merge" | "rebase", default: "squash") — GitHub merge method.
+- `delete_branches` (optional, boolean, default: true) — Delete local branches after merging.
+
+Behavior:
+- Gets stack branches via `git branchless query 'stack()' --branches`.
+- Merges PRs in order using `gh pr merge`. If any merge fails, stops immediately (remaining PRs depend on the failed one).
+- Cleans up local branches after all merges succeed.
+
+### undo_last
+
+Undoes the last git-branchless operation.
+
+No parameters.
+
+Uses `git undo --yes` (non-interactive). Can undo: commits, restacks, checkouts, syncs.
+
+## Workflow Patterns
+
+### Standard flow: split and submit
+```
+create_stack({ commits: [...], base_branch: "main" })
+view_stack()
+submit_stack({ draft: false })
+```
+
+### Review feedback: fix mid-stack commit
+```
+navigate_stack({ direction: "prev", distance: N })
+modify_commit({ files: ["changed-file.ts"] })
+navigate_stack({ direction: "next", distance: N })
+submit_stack({})
+```
+
+### Update after main changes
+```
+sync_stack()
+submit_stack({})
+```
+
+### Final merge
+```
+merge_stack({ method: "squash" })
+```
+
+### Recovery
+```
+undo_last()
+view_stack()
+```
+
+## Decision Guide
+
+**When to use `create_stack`:**
+- User has uncommitted or staged changes that should become multiple PRs.
+- You need to split a large diff into logical, atomic commits.
+
+**When to use `submit_stack`:**
+- After `create_stack` to push and create PRs.
+- After `modify_commit` to update existing PRs with new changes.
+- After `sync_stack` to push rebased branches.
+
+**When to use `modify_commit` vs manual edit + `restack`:**
+- Use `modify_commit` when you have file changes to amend into a specific commit. It handles staging, amending, and restacking in one call.
+- Use `restack` only when you've manually amended a commit outside of Boron.
+
+**When to use `sync_stack`:**
+- Before submitting, if main has diverged.
+- When CI fails due to conflicts with main.
+
+**When to use `undo_last`:**
+- A restack went wrong.
+- You navigated to the wrong commit.
+- Any git-branchless operation produced unexpected results.
+
+## Branch Naming Convention
+
+```
+{type}/{issue-id}-{sequence}-{description}
+```
+
+- type: feat, fix, chore, test, docs, refactor
+- issue-id: project tracker ID (e.g. TM-161)
+- sequence: two-digit ordering (01, 02, 03)
+- description: short kebab-case summary
+
+Examples:
+- feat/tm-161-01-migrations
+- feat/tm-161-02-models
+- feat/tm-161-03-api
+
+## Constraints
+
+- The target repo must have `git branchless init` completed.
+- The target repo must have a GitHub remote (`gh` commands require it).
+- File paths in `create_stack` and `modify_commit` must point to existing files in the working tree.
+- File paths cannot traverse outside the repository root (path traversal is blocked).
+- `merge_stack` requires all PRs in the stack to have passing checks (GitHub merge requirements apply).
+- All operations are synchronous — each tool call completes fully before returning.
+
+## Error Handling
+
+All errors are returned with `isError: true` in the MCP response. Common errors:
+
+- "Not in a git repository" — cwd is not a git repo.
+- "git-branchless not initialized" — run `git branchless init` first.
+- "Path traversal blocked: {file}" — a file path tried to escape the repo root.
+- "No stack branches found" — no active stack exists; use `create_stack` first.
+- "commits must be a non-empty array" — `create_stack` called with empty or missing commits.
+- "at least one of 'files' or 'message' must be provided" — `modify_commit` needs something to change.

@@ -2,9 +2,11 @@
 
 An MCP server for stacked pull requests, powered by [git-branchless](https://github.com/arxanas/git-branchless). A free, open-source alternative to Graphite.
 
-Boron gives AI agents (Claude Code, etc.) the ability to split large code changes into small, reviewable, dependent PRs — automatically.
+Boron gives AI agents (Claude Code, Cursor, etc.) the ability to split large code changes into small, reviewable, dependent PRs — automatically.
 
 ## How it works
+
+Stacked PRs break a large change into a chain of small, dependent pull requests. Each PR builds on the previous one, and each is small enough to review in minutes.
 
 ```
 You write 3,000 lines of code
@@ -18,14 +20,34 @@ Boron submits 6 chained GitHub PRs
 Each PR is reviewable in ~5 minutes
 ```
 
+**Without stacked PRs:** One massive PR that sits in review for days, accumulates merge conflicts, and reviewers rubber-stamp because it's too big to actually read.
+
+**With stacked PRs:** Six focused PRs that each do one thing. Reviewer sees PR 1 (database migrations), approves it. PR 2 (API endpoints) builds on PR 1. Each is digestible. The chain merges bottom-to-top.
+
+### The branch chain
+
+```
+main
+ └── feat/tm-161-01-migrations      ← PR #1 (base: main)
+      └── feat/tm-161-02-models     ← PR #2 (base: PR #1's branch)
+           └── feat/tm-161-03-api   ← PR #3 (base: PR #2's branch)
+```
+
+Each PR targets the previous branch as its base, not `main`. This means reviewers only see the diff for *that specific layer*, not the cumulative changes.
+
 ## Prerequisites
 
 - [Node.js](https://nodejs.org/) >= 18
-- [git-branchless](https://github.com/arxanas/git-branchless) — stack management
-- [GitHub CLI](https://cli.github.com/) (`gh`) — PR creation
+- [git-branchless](https://github.com/arxanas/git-branchless) — stack management engine
+- [GitHub CLI](https://cli.github.com/) (`gh`) — PR creation and merging
 
 ```bash
+# macOS
 brew install git-branchless gh
+
+# Verify
+git branchless --help
+gh auth status
 ```
 
 ## Installation
@@ -47,23 +69,25 @@ npx boron-mcp
 
 ## Setup
 
-### 1. Initialize git-branchless in your repo
+### 1. Initialize git-branchless in your target repo
 
 ```bash
 cd your-project
 git branchless init
 ```
 
-### 2. Add Boron to Claude Code
+This is required once per repo. It sets up git-branchless's commit graph tracking in `.git/branchless/`.
 
-Add to `~/.claude/.mcp.json`:
+### 2. Connect Boron to your AI agent
+
+**Claude Code** — Add to `~/.claude/.mcp.json`:
 
 ```json
 {
   "mcpServers": {
     "boron": {
       "command": "node",
-      "args": ["/path/to/Boron/dist/index.js"]
+      "args": ["/absolute/path/to/Boron/dist/index.js"]
     }
   }
 }
@@ -71,16 +95,23 @@ Add to `~/.claude/.mcp.json`:
 
 Restart Claude Code. Run `/mcp` to verify "boron" appears as connected.
 
+**Cursor / Other MCP clients** — Boron includes a `.mcp.json` at the project root for auto-discovery. Or configure your client to run `node /path/to/Boron/dist/index.js` over stdio.
+
 ## Tools
+
+Boron exposes 9 tools over MCP:
 
 | Tool | Description |
 |------|-------------|
 | `create_stack` | Create a stack of branches from a list of atomic commits |
-| `submit_stack` | Push branches and create chained GitHub PRs |
-| `restack` | Rebase descendants after amending a mid-stack commit |
+| `submit_stack` | Push branches and create chained GitHub PRs (updates existing PRs) |
 | `view_stack` | Show the commit graph via smartlog |
-| `sync_stack` | Pull remote changes and rebase all stacks |
 | `navigate_stack` | Move between commits in the stack |
+| `modify_commit` | Amend the current commit with new files or a new message, auto-restacks |
+| `restack` | Rebase descendants after amending a mid-stack commit |
+| `sync_stack` | Pull remote changes and rebase all stacks |
+| `merge_stack` | Merge all stack PRs from bottom to top |
+| `undo_last` | Undo the last git-branchless operation (commit, restack, checkout, etc.) |
 
 ## Usage
 
@@ -96,7 +127,9 @@ Claude will:
 3. Call `create_stack` to build the branch chain
 4. Call `submit_stack` to create GitHub PRs
 
-### Manual (via MCP)
+### Full workflow example
+
+**Step 1: Create the stack**
 
 ```
 create_stack({
@@ -110,27 +143,68 @@ create_stack({
       branch_name: "feat/tm-161-02-api",
       commit_message: "feat: add auth API endpoints",
       files: ["src/auth/routes.ts", "src/auth/middleware.ts"]
+    },
+    {
+      branch_name: "feat/tm-161-03-tests",
+      commit_message: "test: add auth integration tests",
+      files: ["tests/auth.test.ts"]
     }
   ],
   base_branch: "main",
   linear_issue: "TM-161"
 })
+```
 
+**Step 2: View the result**
+
+```
+view_stack()
+```
+
+Output:
+```
+O abc1234 (main)
+|
+o def5678 (feat/tm-161-01-migrations) feat: add authorization tables
+|
+o ghi9012 (feat/tm-161-02-api) feat: add auth API endpoints
+|
+@ jkl3456 (feat/tm-161-03-tests) test: add auth integration tests
+```
+
+**Step 3: Submit as chained PRs**
+
+```
 submit_stack({ draft: false, linear_issue: "TM-161" })
 ```
 
-### Mid-stack fixes
+This pushes all branches and creates PRs: #1 → main, #2 → #1's branch, #3 → #2's branch.
+
+**Step 4: Fix something mid-stack**
+
+Reviewer wants a change in the migrations PR (the first one):
 
 ```
-navigate_stack({ direction: "prev" })  // go back to the commit
-// ... make your fix, amend the commit ...
-restack()                               // rebase everything above
+navigate_stack({ direction: "prev", distance: 2 })  // back to migrations
+modify_commit({ files: ["migrations/001_auth.sql"] })  // amend + auto-restack
+navigate_stack({ direction: "next", distance: 2 })  // back to tip
+submit_stack({})  // re-push all branches (updates existing PRs)
 ```
 
-### Sync with main
+**Step 5: Merge when approved**
 
 ```
-sync_stack()  // fetch + rebase all stacks onto updated main
+merge_stack({ method: "squash" })
+```
+
+Merges all PRs bottom-to-top. Done.
+
+### Other operations
+
+```
+sync_stack()   // fetch + rebase all stacks onto updated main
+restack()      // manually rebase descendants (if auto_restack was disabled)
+undo_last()    // revert the last git-branchless operation
 ```
 
 ## Branch naming convention
@@ -144,16 +218,31 @@ Examples:
 - `feat/tm-161-02-models`
 - `fix/tm-162-01-validation`
 
-## Why Boron?
+The sequence number (`01`, `02`, `03`) keeps branches ordered. The issue ID links back to your project tracker.
+
+## How Boron compares
 
 | | Boron | Graphite |
 |---|---|---|
 | **Cost** | Free | $32/user/month |
-| **Stack management** | git-branchless | Proprietary |
-| **AI integration** | MCP (works with any agent) | GT MCP only |
+| **Stack management** | git-branchless (open source) | Proprietary |
+| **AI integration** | MCP (works with any agent) | Graphite MCP only |
 | **PR creation** | GitHub CLI | Native |
 | **Open source** | Yes | No |
 | **Vendor lock-in** | None | Yes |
+
+## Architecture
+
+```
+MCP Client → index.ts (server) → handlers.ts (logic) → git.ts (CLI execution)
+```
+
+- All git operations use `execFileSync` — synchronous by design since they're sequential CLI commands
+- Tool arguments are validated at the boundary via assertion functions (no unsafe casts)
+- File paths are checked against path traversal before use
+- Stack detection uses `git branchless query 'stack()' --branches`, not regex
+
+See [CLAUDE.md](./CLAUDE.md) for detailed development guidance.
 
 ## License
 
