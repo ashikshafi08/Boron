@@ -1,0 +1,41 @@
+{
+  "name": "boron-mcp",
+  "version": "0.1.0",
+  "description": "MCP server for stacked PRs using git-branchless. A free, open-source alternative to Graphite.",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "boron": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc --watch",
+    "start": "node dist/index.js",
+    "dev": "tsc --watch & node --watch dist/index.js"
+  },
+  "keywords": [
+    "mcp",
+    "git",
+    "stacked-prs",
+    "git-branchless",
+    "claude-code",
+    "pull-requests",
+    "developer-tools"
+  ],
+  "author": "ashikshafi08",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ashikshafi08/Boron.git"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.4"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "typescript": "^5.7.3"
+  }
+}
