@@ -52,19 +52,23 @@ gh auth status
 
 ## Installation
 
-### Option 1: Clone and build
+### Option 1: npm install (recommended)
+
+```bash
+npm install -g boron-mcp
+```
+
+### Option 2: npx (no install required)
+
+No installation needed — use `npx boron-mcp` directly in your MCP config.
+
+### Option 3: Clone and build (for development)
 
 ```bash
 git clone https://github.com/ashikshafi08/Boron.git
 cd Boron
 npm install
 npm run build
-```
-
-### Option 2: npx (coming soon)
-
-```bash
-npx boron-mcp
 ```
 
 ## Setup
@@ -82,6 +86,30 @@ This is required once per repo. It sets up git-branchless's commit graph trackin
 
 **Claude Code** — Add to `~/.claude/.mcp.json`:
 
+**If you installed globally (Option 1):**
+```json
+{
+  "mcpServers": {
+    "boron": {
+      "command": "boron"
+    }
+  }
+}
+```
+
+**If using npx (Option 2):**
+```json
+{
+  "mcpServers": {
+    "boron": {
+      "command": "npx",
+      "args": ["boron-mcp"]
+    }
+  }
+}
+```
+
+**If you cloned and built (Option 3):**
 ```json
 {
   "mcpServers": {
@@ -95,7 +123,7 @@ This is required once per repo. It sets up git-branchless's commit graph trackin
 
 Restart Claude Code. Run `/mcp` to verify "boron" appears as connected.
 
-**Cursor / Other MCP clients** — Boron includes a `.mcp.json` at the project root for auto-discovery. Or configure your client to run `node /path/to/Boron/dist/index.js` over stdio.
+**Cursor / Other MCP clients** — Use the same configuration format for your client's MCP settings file.
 
 ## Tools
 
