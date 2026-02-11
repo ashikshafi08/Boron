@@ -68,7 +68,7 @@ export class StackHandlers {
     const { branch_name, commit_message, files } = commit;
     const lines: string[] = [];
 
-    this.git.run(["checkout", "-b", "--", branch_name]);
+    this.git.run(["checkout", "-b", branch_name]);
     lines.push(`\nCreated branch: ${branch_name}`);
 
     const existing = files.filter((f) => existsSync(join(this.cwd, f)));
@@ -147,7 +147,6 @@ export class StackHandlers {
       "log",
       "-1",
       "--pretty=%s",
-      "--",
       branch,
     ]);
 
@@ -182,7 +181,7 @@ export class StackHandlers {
       this.validateFilePaths(commit.files);
     }
 
-    this.git.run(["checkout", "--", base_branch]);
+    this.git.run(["checkout", base_branch]);
     lines.push(`Starting from ${base_branch}`);
 
     for (const commit of commits) {
