@@ -244,6 +244,25 @@ MCP Client → index.ts (server) → handlers.ts (logic) → git.ts (CLI executi
 
 See [CLAUDE.md](./CLAUDE.md) for detailed development guidance.
 
+## Security
+
+Boron runs `git` and `gh` commands using your local credentials. Here's what it does and doesn't have access to:
+
+**Scope:**
+- Operates only within the current working directory (path traversal is blocked)
+- Uses `execFileSync` with argument arrays — no shell interpolation, no command injection
+- Branch names validated against strict alphanumeric regex
+- File paths checked for traversal, symlinks resolved before access
+- All git commands use `--` separator to prevent flag injection
+
+**What Boron does NOT do:**
+- Read or write files outside the repository root
+- Execute arbitrary shell commands
+- Store credentials, tokens, or secrets
+- Make network requests beyond `git push` and `gh` API calls
+
+**For auditing:** Tool descriptions are static in [`src/tools.ts`](./src/tools.ts). Input validation is in [`src/validation.ts`](./src/validation.ts).
+
 ## License
 
 MIT
