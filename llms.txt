@@ -189,6 +189,23 @@ Examples:
 - feat/tm-161-02-models
 - feat/tm-161-03-api
 
+## Critical: Do Not Mix Stack and Direct-to-Main Workflows
+
+Once you create a stack with `create_stack`, ALL changes to files involved in that stack must go through the stack — never commit directly to main while a stack is active.
+
+**What goes wrong if you do:**
+1. You create a stack and `submit_stack` creates PRs
+2. You then commit changes to the same files directly on main (bypassing the stack)
+3. Main moves ahead of the stack branches
+4. The stack PRs now conflict with main (same files, different versions)
+5. After rebasing, some PRs become empty and auto-close, breaking the chain
+
+**The rule:** If a stack is active, either:
+- Put all related changes through the stack (`navigate_stack` → `modify_commit` → `submit_stack`)
+- Or `merge_stack` / close the existing PRs first, *then* commit to main
+
+Use `view_stack()` to check if there's an active stack before committing directly to main.
+
 ## Constraints
 
 - The target repo must have `git branchless init` completed.
