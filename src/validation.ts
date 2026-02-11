@@ -15,6 +15,34 @@ function assertObject(
   }
 }
 
+const BRANCH_NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9._\/-]*$/;
+const MAX_COMMITS = 50;
+
+function assertBranchName(name: unknown, label: string): asserts name is string {
+  if (typeof name !== "string") {
+    throw new Error(`${label} must be a string`);
+  }
+  if (!BRANCH_NAME_RE.test(name)) {
+    throw new Error(
+      `${label} contains invalid characters. Must start with alphanumeric and contain only alphanumeric, '.', '_', '/', '-'.`
+    );
+  }
+}
+
+function assertStringArray(value: unknown, label: string): asserts value is string[] {
+  if (!Array.isArray(value)) {
+    throw new Error(`${label} must be an array`);
+  }
+  for (const [i, item] of value.entries()) {
+    if (typeof item !== "string") {
+      throw new Error(`${label}[${i}] must be a string`);
+    }
+    if (item.includes("\0")) {
+      throw new Error(`${label}[${i}] contains null bytes`);
+    }
+  }
+}
+
 export function assertCreateStackArgs(value: unknown): CreateStackArgs {
   assertObject(value, "create_stack");
   const obj = value as Record<string, unknown>;
@@ -22,19 +50,22 @@ export function assertCreateStackArgs(value: unknown): CreateStackArgs {
   if (!Array.isArray(obj.commits) || obj.commits.length === 0) {
     throw new Error("create_stack: 'commits' must be a non-empty array");
   }
+  if (obj.commits.length > MAX_COMMITS) {
+    throw new Error(`create_stack: maximum ${MAX_COMMITS} commits per stack`);
+  }
 
   for (const [i, c] of obj.commits.entries()) {
     assertObject(c, `commits[${i}]`);
     const commit = c as Record<string, unknown>;
-    if (typeof commit.branch_name !== "string") {
-      throw new Error(`commits[${i}].branch_name must be a string`);
-    }
+    assertBranchName(commit.branch_name, `commits[${i}].branch_name`);
     if (typeof commit.commit_message !== "string") {
       throw new Error(`commits[${i}].commit_message must be a string`);
     }
-    if (!Array.isArray(commit.files)) {
-      throw new Error(`commits[${i}].files must be an array`);
-    }
+    assertStringArray(commit.files, `commits[${i}].files`);
+  }
+
+  if (obj.base_branch !== undefined) {
+    assertBranchName(obj.base_branch, "create_stack: base_branch");
   }
 
   return value as unknown as CreateStackArgs;
@@ -63,8 +94,17 @@ export function assertNavigateStackArgs(value: unknown): NavigateStackArgs {
       "navigate_stack: 'direction' must be 'next' or 'prev'"
     );
   }
-  if (obj.distance !== undefined && typeof obj.distance !== "number") {
-    throw new Error("navigate_stack: 'distance' must be a number");
+  if (obj.distance !== undefined) {
+    if (
+      typeof obj.distance !== "number" ||
+      !Number.isInteger(obj.distance) ||
+      obj.distance < 1 ||
+      obj.distance > 100
+    ) {
+      throw new Error(
+        "navigate_stack: 'distance' must be an integer between 1 and 100"
+      );
+    }
   }
 
   return value as unknown as NavigateStackArgs;
@@ -74,8 +114,8 @@ export function assertModifyCommitArgs(value: unknown): ModifyCommitArgs {
   assertObject(value, "modify_commit");
   const obj = value as Record<string, unknown>;
 
-  if (obj.files !== undefined && !Array.isArray(obj.files)) {
-    throw new Error("modify_commit: 'files' must be an array");
+  if (obj.files !== undefined) {
+    assertStringArray(obj.files, "modify_commit: files");
   }
   if (obj.message !== undefined && typeof obj.message !== "string") {
     throw new Error("modify_commit: 'message' must be a string");
@@ -97,10 +137,12 @@ export function assertMergeStackArgs(value: unknown): MergeStackArgs {
   const obj = value as Record<string, unknown>;
 
   const validMethods = ["squash", "merge", "rebase"];
-  if (obj.method !== undefined && !validMethods.includes(obj.method as string)) {
-    throw new Error(
-      `merge_stack: 'method' must be one of: ${validMethods.join(", ")}`
-    );
+  if (obj.method !== undefined) {
+    if (typeof obj.method !== "string" || !validMethods.includes(obj.method)) {
+      throw new Error(
+        `merge_stack: 'method' must be one of: ${validMethods.join(", ")}`
+      );
+    }
   }
   if (
     obj.delete_branches !== undefined &&

@@ -12,7 +12,7 @@ class CLIRunner {
       }).trim();
     } catch (error: unknown) {
       const stderr = extractStderr(error);
-      throw new Error(`${this.binary} ${args.join(" ")} failed:\n${stderr}`);
+      throw new Error(`${this.binary} command failed:\n${stderr}`);
     }
   }
 }

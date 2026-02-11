@@ -1,5 +1,5 @@
-import { existsSync } from "fs";
-import { join, resolve } from "path";
+import { existsSync, realpathSync } from "fs";
+import { join, resolve, isAbsolute } from "path";
 import { createGit, createGh } from "./git.js";
 import type { CLIRunner } from "./git.js";
 import type {
@@ -20,6 +20,7 @@ export class StackHandlers {
     this.cwd = cwd;
     this.git = createGit(cwd);
     this.gh = createGh(cwd);
+    this.validateRepository();
   }
 
   private result(text: string): CallToolResult {
@@ -27,10 +28,24 @@ export class StackHandlers {
   }
 
   private validateFilePaths(files: string[]): void {
+    const cwdWithSep = this.cwd.endsWith("/") ? this.cwd : this.cwd + "/";
     for (const file of files) {
+      if (isAbsolute(file)) {
+        throw new Error(`Absolute paths not allowed: ${file}`);
+      }
+      if (file.includes("\0")) {
+        throw new Error(`Null bytes in path blocked`);
+      }
       const resolved = resolve(this.cwd, file);
-      if (!resolved.startsWith(this.cwd)) {
+      if (!resolved.startsWith(cwdWithSep) && resolved !== this.cwd) {
         throw new Error(`Path traversal blocked: ${file}`);
+      }
+      // Resolve symlinks if the file exists
+      if (existsSync(resolved)) {
+        const real = realpathSync(resolved);
+        if (!real.startsWith(cwdWithSep) && real !== this.cwd) {
+          throw new Error(`Symlink traversal blocked: ${file}`);
+        }
       }
     }
   }
@@ -53,7 +68,7 @@ export class StackHandlers {
     const { branch_name, commit_message, files } = commit;
     const lines: string[] = [];
 
-    this.git.run(["checkout", "-b", branch_name]);
+    this.git.run(["checkout", "-b", "--", branch_name]);
     lines.push(`\nCreated branch: ${branch_name}`);
 
     const existing = files.filter((f) => existsSync(join(this.cwd, f)));
@@ -67,7 +82,7 @@ export class StackHandlers {
       lines.push(`Warning — files not found: ${missing.join(", ")}`);
     }
 
-    this.git.run(["add", ...existing]);
+    this.git.run(["add", "--", ...existing]);
 
     const fullMessage = linearIssue
       ? `${commit_message}\n\nRelated: ${linearIssue}`
@@ -132,6 +147,7 @@ export class StackHandlers {
       "log",
       "-1",
       "--pretty=%s",
+      "--",
       branch,
     ]);
 
@@ -166,9 +182,7 @@ export class StackHandlers {
       this.validateFilePaths(commit.files);
     }
 
-    this.validateRepository();
-
-    this.git.run(["checkout", base_branch]);
+    this.git.run(["checkout", "--", base_branch]);
     lines.push(`Starting from ${base_branch}`);
 
     for (const commit of commits) {
@@ -317,7 +331,7 @@ export class StackHandlers {
 
     if (files) {
       this.validateFilePaths(files);
-      this.git.run(["add", ...files]);
+      this.git.run(["add", "--", ...files]);
       this.git.run(["commit", "--amend", "--no-edit"]);
       lines.push(`Amended commit with files: ${files.join(", ")}`);
     }
@@ -382,7 +396,7 @@ export class StackHandlers {
     if (delete_branches) {
       for (const branch of stackBranches) {
         try {
-          this.git.run(["branch", "-D", branch]);
+          this.git.run(["branch", "-D", "--", branch]);
         } catch {
           // Branch may already be deleted by --delete-branch
         }
